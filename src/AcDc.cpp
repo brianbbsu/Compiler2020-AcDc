@@ -382,7 +382,7 @@ AST *Parser::parseExpression(AST *LHS) {
 
 template<class T>
 T constantOperation(AST *a, AST *b, ASTNodeType op) {
-  assert(std::holds_alternative<T>(a) && std::holds_alternative<T>(b));
+  assert(std::holds_alternative<T>(a->Value) && std::holds_alternative<T>(b->Value));
   switch(op) {
     case BIN_ADD_NODE:
         return std::get<T>(a->Value) + std::get<T>(b->Value);
