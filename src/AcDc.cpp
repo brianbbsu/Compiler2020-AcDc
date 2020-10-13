@@ -382,8 +382,16 @@ AST *Parser::parseExpression(AST *LHS) {
 
 template<class T>
 T constantOperation(AST *a, AST *b, ASTNodeType op) {
-  if (op == BIN_ADD_NODE) return std::get<T>(a->Value) + std::get<T>(b->Value);
-  else return std::get<T>(a->Value) - std::get<T>(b->Value);
+  assert(std::holds_alternative<T>(a) && std::holds_alternative<T>(b));
+  switch(op) {
+    case BIN_ADD_NODE:
+        return std::get<T>(a->Value) + std::get<T>(b->Value);
+    case BIN_SUB_NODE:
+        return std::get<T>(a->Value) - std::get<T>(b->Value);
+    default:
+        emitError("ConstantFolding", "unknown operator.");
+  }
+  __builtin_unreachable();
 }
 
 void doConstantFolding(AST *Stmt) {
@@ -397,6 +405,7 @@ void doConstantFolding(AST *Stmt) {
     return;
   ASTNodeType type = Stmt->Type;
   if (type == BIN_ADD_NODE || type == BIN_SUB_NODE) {
+    assert(Stmt->SubTree.size() == (size_t)2);
     DataType dType = std::get<DataType>(Stmt->Value);
     if (dType == DATA_INT)
       Stmt->Value = constantOperation<int>(Stmt->SubTree[0], Stmt->SubTree[1], type);
@@ -404,6 +413,7 @@ void doConstantFolding(AST *Stmt) {
       Stmt->Value = constantOperation<float>(Stmt->SubTree[0], Stmt->SubTree[1], type);
     Stmt->Type = dType == DATA_INT ? CONST_INT_NODE : CONST_FLOAT_NODE;
   } else if (type == CONVERSION_NODE) {
+    assert(Stmt->SubTree.size() == (size_t)1);
     Stmt->Value = static_cast<float>(std::get<int>(Stmt->SubTree[0]->Value));
     Stmt->Type = CONST_FLOAT_NODE;
   } else {
