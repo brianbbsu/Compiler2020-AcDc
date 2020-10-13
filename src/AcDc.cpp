@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -92,23 +93,13 @@ Token Tokenizer::getDeclOrIDToken(char C) {
     C = IFS.get();
   }
   IFS.unget();
-  if (Value.size() > 1)
-    emitError("Tokenizer", "expecting single-character token.");
   Token Tok;
-  switch (Value[0]) {
-  case 'i':
-    Tok.Type = DECL_INT;
-    break;
-  case 'f':
-    Tok.Type = DECL_FLOAT;
-    break;
-  case 'p':
-    Tok.Type = CMD_PRINT;
-    break;
-  default:
+  if      (Value == "i") Tok.Type = DECL_INT;
+  else if (Value == "f") Tok.Type = DECL_FLOAT;
+  else if (Value == "p") Tok.Type = CMD_PRINT;
+  else {
     Tok.Type = IDENTIFIER;
     Tok.Value = Value;
-    break;
   }
   return Tok;
 }
@@ -212,26 +203,28 @@ struct AST {
 };
 
 class SymbolTable {
-  std::unordered_map<char, size_t> VarID;
+  std::unordered_map<std::string, size_t> VarID;
   std::vector<VariableType> VarType;
 
 public:
-  size_t declareSymbol(char ID, TokenType DeclType) {
+  size_t declareSymbol(std::string ID, TokenType DeclType) {
     if (VarID.find(ID) != VarID.end())
       emitError("SymbolTable", "redeclaration of variable ", ID);
     size_t Res = (VarID[ID] = VarType.size());
+    if (Res >= 23)
+      emitError("SymbolTable", "There should be at most 23 different variables");
     VarType.push_back((DeclType == DECL_INT ? VAR_INT : VAR_FLOAT));
     return Res;
   }
 
-  size_t getVarID(char ID) const {
+  size_t getVarID(std::string ID) const {
     auto Iter = VarID.find(ID);
     if (Iter == VarID.end())
       emitError("SymbolTable", "use of undeclared identifier ", ID);
     return Iter->second;
   }
 
-  VariableType getVarType(char ID) const { return VarType[getVarID(ID)]; }
+  VariableType getVarType(std::string ID) const { return VarType[getVarID(ID)]; }
   VariableType getVarType(size_t V) const { return VarType[V]; }
 };
 
@@ -239,7 +232,7 @@ class Parser {
   Tokenizer TK;
   SymbolTable ST;
   AST *parseStatement();
-  AST *parseAssignment(char ID);
+  AST *parseAssignment(std::string ID);
   AST *parseDeclaration(TokenType DeclType);
   AST *parseValue();
   AST *parseExpression(AST *LHS);
@@ -278,9 +271,7 @@ AST *Parser::parseStatement() {
     return parseDeclaration(Tok.Type);
 
   if (Tok.Type == IDENTIFIER) {
-    assert(Tok.Value.size() == 1 &&
-           "Variable names with multiple characters are not supported.");
-    return parseAssignment(Tok.Value[0]);
+    return parseAssignment(Tok.Value);
   }
 
   if (Tok.Type != CMD_PRINT)
@@ -292,9 +283,7 @@ AST *Parser::parseStatement() {
     emitError("Parser", "expecting IDENTIFIER, but ", Tok.Type, " found.");
 
   // Print statement.
-  assert(Tok.Value.size() == 1 &&
-         "Variable names with multiple characters are not supported.");
-  size_t Var = ST.getVarID(Tok.Value[0]);
+  size_t Var = ST.getVarID(Tok.Value);
   AST *Node = new AST(PRINTSTMT_NODE);
   Node->Value = Var;
   return Node;
@@ -305,13 +294,11 @@ AST *Parser::parseDeclaration(TokenType DeclType) {
   if (Tok.Type != IDENTIFIER)
     emitError("Parser", "expecting IDENTIFIER, but ", DeclType, " found.");
   AST *Node = new AST(DECLARATION_NODE);
-  assert(Tok.Value.size() == 1 &&
-         "Variable names with multiple characters are not supported.");
-  Node->Value = ST.declareSymbol(Tok.Value[0], DeclType);
+  Node->Value = ST.declareSymbol(Tok.Value, DeclType);
   return Node;
 }
 
-AST *Parser::parseAssignment(char ID) {
+AST *Parser::parseAssignment(std::string ID) {
   size_t Var = ST.getVarID(ID);
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
@@ -371,9 +358,7 @@ AST *Parser::parseValue() {
     break;
   case IDENTIFIER:
     Node->Type = IDENTIFIER_NODE;
-    assert(Tok.Value.size() == 1 &&
-           "Variable names with multiple characters are not supported.");
-    Node->Value = ST.getVarID(Tok.Value[0]);
+    Node->Value = ST.getVarID(Tok.Value);
     break;
   default:
     emitError("Parser", "expecting CONST_INT, CONST_FLOAT or IDENTIFIER, but ",
@@ -393,6 +378,40 @@ AST *Parser::parseExpression(AST *LHS) {
   Node->Value = promoteType(LHS, RHS);
   Node->SubTree = {LHS, RHS};
   return parseExpression(Node);
+}
+
+template<class T>
+T constantOperation(AST *a, AST *b, ASTNodeType op) {
+  if (op == BIN_ADD_NODE) return std::get<T>(a->Value) + std::get<T>(b->Value);
+  else return std::get<T>(a->Value) - std::get<T>(b->Value);
+}
+
+void doConstantFolding(AST *Stmt) {
+  bool allConst = true;
+  for (AST *Node : Stmt->SubTree) {
+    doConstantFolding(Node);
+    if (Node->Type != CONST_INT_NODE && Node->Type != CONST_FLOAT_NODE)
+      allConst = false;
+  }
+  if (!allConst)
+    return;
+  ASTNodeType type = Stmt->Type;
+  if (type == BIN_ADD_NODE || type == BIN_SUB_NODE) {
+    DataType dType = std::get<DataType>(Stmt->Value);
+    if (dType == DATA_INT)
+      Stmt->Value = constantOperation<int>(Stmt->SubTree[0], Stmt->SubTree[1], type);
+    else
+      Stmt->Value = constantOperation<float>(Stmt->SubTree[0], Stmt->SubTree[1], type);
+    Stmt->Type = dType == DATA_INT ? CONST_INT_NODE : CONST_FLOAT_NODE;
+  } else if (type == CONVERSION_NODE) {
+    Stmt->Value = static_cast<float>(std::get<int>(Stmt->SubTree[0]->Value));
+    Stmt->Type = CONST_FLOAT_NODE;
+  } else {
+    return;
+  }
+  for (AST *Node : Stmt->SubTree)
+    delete Node;
+  Stmt->SubTree.clear();
 }
 
 class DCCodeGen {
@@ -448,10 +467,14 @@ void DCCodeGen::genExpression(AST *Expr) {
         << "\n";
     return;
   case CONST_INT_NODE:
-    OFS << std::get<int>(Expr->Value) << "\n";
+    if (std::get<int>(Expr->Value) < 0)
+      OFS << "_";
+    OFS << abs(std::get<int>(Expr->Value)) << "\n";
     return;
   case CONST_FLOAT_NODE:
-    OFS << std::get<float>(Expr->Value) << "\n";
+    if (std::get<float>(Expr->Value) < 0)
+      OFS << "_";
+    OFS << fabs(std::get<float>(Expr->Value)) << "\n";
     return;
   case BIN_ADD_NODE:
   case BIN_SUB_NODE: {
@@ -496,6 +519,7 @@ int main(int argc, const char **argv) {
   }
   Parser PS(std::move(Source));
   AST *Program = PS.parse();
+  doConstantFolding(Program);
   DCCodeGen DCG(PS.getSymbolTable(), std::move(Target));
   DCG.genProgram(Program);
   delete Program;

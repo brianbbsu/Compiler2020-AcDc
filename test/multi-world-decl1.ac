@@ -1,0 +1,6 @@
+i int
+f float
+int = 5
+float = 0.5
+float = int + float
+p float
