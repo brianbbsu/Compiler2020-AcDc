@@ -1,0 +1,13 @@
+i a
+i b
+f c
+f d
+f e
+a = 1
+b = 2
+c = 3.0
+d = 4.0
+
+e = a - ((b + c) / d)
+
+p e

@@ -1,0 +1,7 @@
+i a
+i b
+i c
+a = 5
+b = 10
+c = ((a + b) + (a - b)
+p c

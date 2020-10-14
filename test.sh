@@ -25,19 +25,23 @@ SUCCESS_CNT=0
 TOTAL_CNT=0
 for input in $SOURCES; do
     TOTAL_CNT=$((TOTAL_CNT+1))
-    REGEX='.*\/([^\/.]+)+(\.error)?\.ac'
+    REGEX='.*\/([^\/.]+)+(\.error)?(\.DCerror)?\.ac'
     if [[ ! $input =~ $REGEX ]]; then
         echo "Regex match failed for input file ${input}"
         exit 2
     fi
     testcase="${BASH_REMATCH[1]}"
     ERROR_FLAG=0
+    DCERROR_FLAG=0
     EXPECTED_FLAG=0
     for flag in ${BASH_REMATCH[@]:2}; do
         if [[ -n "$flag" ]]; then
             case "$flag" in
               .error)
                 ERROR_FLAG=1
+                ;;
+              .DCerror)
+                DCERROR_FLAG=1
                 ;;
               *)
                 echo "Flag '$flag' was not properly hanlded."
@@ -52,6 +56,7 @@ for input in $SOURCES; do
     fi
     flags=""
     if [[ "$ERROR_FLAG" = "1" ]]; then flags="${flags},error"; fi
+    if [[ "$DCERROR_FLAG" = "1" ]]; then flags="${flags},DCerror"; fi
     if [[ "$EXPECTED_FLAG" = "1" ]]; then flags="${flags},expected"; fi
     flags="${flags#,}"
     EXIT_STATUS=0
@@ -71,8 +76,15 @@ for input in $SOURCES; do
     fi
     dc -f "${WORKSPACE}/output.dc" > "${WORKSPACE}/dc.out" 2>"${WORKSPACE}/dc.err"
     if [[ -s "${WORKSPACE}/dc.err" ]]; then
-        printf "$FMT" "$testcase" "Failed - dc Runtime Error" "$flags"
-        continue
+        if [[ "$DCERROR_FLAG" -eq "0" ]]; then
+            printf "$FMT" "$testcase" "Failed - dc Runtime Error" "$flags"
+            continue
+        fi
+    else
+        if [[ "$DCERROR_FLAG" -eq "1" ]]; then
+            printf "$FMT" "$testcase" "Failed - dc Passed" "$flags"
+            continue
+        fi
     fi
     if [[ "$EXPECTED_FLAG" = "1" ]] && \
         ! `diff --strip-trailing-cr -B -Z "${WORKSPACE}/dc.out" \

@@ -1,0 +1,13 @@
+i a
+i b
+i c
+i d
+i e
+i f
+a = 1
+b = 2
+c = 3
+d = 4
+e = 5
+f = a * d / 2 + e + a - c * d / b * e + a / (c - d) + 5
+p f
