@@ -21,7 +21,11 @@ enum TokenType {
   IDENTIFIER,
   BIN_OP_ADD,    // addition operator ("+")
   BIN_OP_SUB,    // subtraction operator ("-")
+  BIN_OP_MUL,    // multiplication operator ("*")
+  BIN_OP_DIV,    // division operator("/")
   BIN_OP_ASSIGN, // assignment operator ("=")
+  PAREN_L, // left parenthesis ("(")
+  PAREN_R, // right parenthesis (")")
   END_OF_FILE    // EOF
 };
 
@@ -57,6 +61,7 @@ class Tokenizer {
   Token getNumericToken(char C);
   Token getDeclOrIDToken(char C);
   Token getOpToken(char C) const;
+  Token getParenthesisToken(char C) const;
 
 public:
   Tokenizer(std::ifstream &&S)
@@ -110,10 +115,25 @@ Token Tokenizer::getOpToken(char C) const {
     return Token{BIN_OP_ADD};
   case '-':
     return Token{BIN_OP_SUB};
+  case '*':
+    return Token{BIN_OP_MUL};
+  case '/':
+    return Token{BIN_OP_DIV};
   case '=':
     return Token{BIN_OP_ASSIGN};
   default:
-    emitError("Tokenizer", "expecting '+', '-', or '=', but '", C, "' found.");
+    emitError("Tokenizer", "expecting '+', '-', '*', '/', or '=', but '", C, "' found.");
+  }
+}
+
+Token Tokenizer::getParenthesisToken(char C) const {
+  switch (C) {
+  case '(':
+    return Token{PAREN_L};
+  case ')':
+    return Token{PAREN_R};
+  default:
+    emitError("Tokenizer", "expecting '(' or '), but '", C, "' found.");
   }
 }
 
@@ -131,6 +151,8 @@ Token Tokenizer::getNextToken() {
     return getNumericToken(C);
   if (isalpha(C))
     return getDeclOrIDToken(C);
+  if (C == ')' || C == '(')
+    return getParenthesisToken(C);
 
   return getOpToken(C);
 }
@@ -155,8 +177,16 @@ std::ostream &operator<<(std::ostream &S, TokenType T) {
     return S << "BIN_OP_ADD";
   case BIN_OP_SUB:
     return S << "BIN_OP_SUB";
+  case BIN_OP_MUL:
+    return S << "BIN_OP_MUL";
+  case BIN_OP_DIV:
+    return S << "BIN_OP_DIV";
   case BIN_OP_ASSIGN:
     return S << "BIN_OP_ASSIGN";
+  case PAREN_L:
+    return S << "PAREN_L";
+  case PAREN_R:
+    return S << "PAREN_R";
   case END_OF_FILE:
     return S << "END_OF_FILE";
   }
@@ -181,6 +211,8 @@ enum ASTNodeType {
   CONST_FLOAT_NODE,
   BIN_ADD_NODE,
   BIN_SUB_NODE,
+  BIN_MUL_NODE,
+  BIN_DIV_NODE,
   CONVERSION_NODE
 };
 
@@ -235,7 +267,10 @@ class Parser {
   AST *parseAssignment(std::string ID);
   AST *parseDeclaration(TokenType DeclType);
   AST *parseValue();
-  AST *parseExpression(AST *LHS);
+  AST *parseExpression();
+  AST *parseExpressionAddSub(AST *LHS);
+  AST *parseExpressionMulDiv(AST *LHS);
+
 
   DataType getDataType(AST *Node) const;
   DataType promoteType(AST *&LHS, AST *&RHS) const;
@@ -303,8 +338,7 @@ AST *Parser::parseAssignment(std::string ID) {
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
 
-  AST *LHS = parseValue();
-  AST *Expr = parseExpression(LHS);
+  AST *Expr = parseExpression();
   if (getDataType(Expr) == DATA_FLOAT && ST.getVarType(Var) == VAR_INT)
     emitError("Parser", "cannot convert float to integer.");
   AST *Node = new AST(ASSIGNMENT_NODE, Expr);
@@ -313,17 +347,22 @@ AST *Parser::parseAssignment(std::string ID) {
 }
 
 DataType Parser::getDataType(AST *Node) const {
-  if (Node->Type == CONST_INT_NODE)
-    return DATA_INT;
-  if (Node->Type == CONST_FLOAT_NODE)
-    return DATA_FLOAT;
-  if (Node->Type == IDENTIFIER_NODE)
-    return ST.getVarType(std::get<size_t>(Node->Value)) == VAR_INT ? DATA_INT
-                                                                   : DATA_FLOAT;
-  if (Node->Type == BIN_ADD_NODE || Node->Type == BIN_SUB_NODE)
-    return std::get<DataType>(Node->Value);
-
-  emitError("Parser", "unexpected AST node type.");
+  switch (Node->Type) {
+    case CONST_INT_NODE:
+      return DATA_INT;
+    case CONST_FLOAT_NODE:
+      return DATA_FLOAT;
+    case IDENTIFIER_NODE:
+      return ST.getVarType(std::get<size_t>(Node->Value)) == VAR_INT ? DATA_INT
+                                                                     : DATA_FLOAT;
+    case BIN_ADD_NODE:
+    case BIN_SUB_NODE:
+    case BIN_MUL_NODE:
+    case BIN_DIV_NODE:
+      return std::get<DataType>(Node->Value);
+    default:
+      emitError("Parser", "unexpected AST node type.");
+  }
 }
 
 DataType Parser::promoteType(AST *&LHS, AST *&RHS) const {
@@ -345,6 +384,7 @@ DataType Parser::promoteType(AST *&LHS, AST *&RHS) const {
 }
 
 AST *Parser::parseValue() {
+  // TODO
   Token Tok = TK.readToken();
   AST *Node = new AST();
   switch (Tok.Type) {
@@ -360,24 +400,50 @@ AST *Parser::parseValue() {
     Node->Type = IDENTIFIER_NODE;
     Node->Value = ST.getVarID(Tok.Value);
     break;
+  case PAREN_L: {
+    Node = parseExpression();
+    if (TK.readToken().Type != PAREN_R)
+      emitError("Parser", "expecting PAREN_R, but ", Tok.Type, " found.");
+    break;
+  }
   default:
-    emitError("Parser", "expecting CONST_INT, CONST_FLOAT or IDENTIFIER, but ",
+    emitError("Parser", "expecting CONST_INT, CONST_FLOAT, IDENTIFIER or PAREN_L, but ",
               Tok.Type, " found.");
   }
   return Node;
 }
 
-AST *Parser::parseExpression(AST *LHS) {
+AST *Parser::parseExpression() {
+  AST *Value = parseValue();
+  AST *Node = parseExpressionMulDiv(Value);
+  return parseExpressionAddSub(Node);
+}
+
+AST *Parser::parseExpressionMulDiv(AST *LHS) {
+  TokenType Type = TK.peekToken().Type;
+  if (Type != BIN_OP_MUL && Type != BIN_OP_DIV)
+    return LHS;
+
+  TK.readToken();
+  AST *Node = new AST(Type == BIN_OP_MUL ? BIN_MUL_NODE : BIN_DIV_NODE);
+  AST *RHS = parseValue();
+  Node->Value = promoteType(LHS, RHS);
+  Node->SubTree = {LHS, RHS};
+  return parseExpressionMulDiv(Node);
+}
+
+AST *Parser::parseExpressionAddSub(AST *LHS) {
   TokenType Type = TK.peekToken().Type;
   if (Type != BIN_OP_ADD && Type != BIN_OP_SUB)
     return LHS;
 
   TK.readToken();
+  AST *Value = parseValue();
+  AST *RHS = parseExpressionMulDiv(Value);
   AST *Node = new AST(Type == BIN_OP_ADD ? BIN_ADD_NODE : BIN_SUB_NODE);
-  AST *RHS = parseValue();
   Node->Value = promoteType(LHS, RHS);
   Node->SubTree = {LHS, RHS};
-  return parseExpression(Node);
+  return parseExpressionAddSub(Node);
 }
 
 template<class T>
@@ -385,11 +451,16 @@ T constantOperation(AST *a, AST *b, ASTNodeType op) {
   assert(std::holds_alternative<T>(a->Value) && std::holds_alternative<T>(b->Value));
   switch(op) {
     case BIN_ADD_NODE:
-        return std::get<T>(a->Value) + std::get<T>(b->Value);
+      return std::get<T>(a->Value) + std::get<T>(b->Value);
     case BIN_SUB_NODE:
-        return std::get<T>(a->Value) - std::get<T>(b->Value);
+      return std::get<T>(a->Value) - std::get<T>(b->Value);
+    case BIN_MUL_NODE:
+      return std::get<T>(a->Value) * std::get<T>(b->Value);
+    case BIN_DIV_NODE:
+      // TODO: handle zero division ?
+      return std::get<T>(a->Value) / std::get<T>(b->Value);
     default:
-        emitError("ConstantFolding", "unknown operator.");
+      emitError("ConstantFolding", "unknown operator.");
   }
   __builtin_unreachable();
 }
@@ -403,8 +474,14 @@ void doConstantFolding(AST *Stmt) {
   }
   if (!allConst)
     return;
+
   ASTNodeType type = Stmt->Type;
-  if (type == BIN_ADD_NODE || type == BIN_SUB_NODE) {
+  switch (type) {
+  case BIN_ADD_NODE:
+  case BIN_SUB_NODE:
+  case BIN_MUL_NODE:
+  case BIN_DIV_NODE: {
+    // TODO: handle zero division
     assert(Stmt->SubTree.size() == (size_t)2);
     DataType dType = std::get<DataType>(Stmt->Value);
     if (dType == DATA_INT)
@@ -412,13 +489,17 @@ void doConstantFolding(AST *Stmt) {
     else
       Stmt->Value = constantOperation<float>(Stmt->SubTree[0], Stmt->SubTree[1], type);
     Stmt->Type = dType == DATA_INT ? CONST_INT_NODE : CONST_FLOAT_NODE;
-  } else if (type == CONVERSION_NODE) {
+    break;
+  }
+  case CONVERSION_NODE:
     assert(Stmt->SubTree.size() == (size_t)1);
     Stmt->Value = static_cast<float>(std::get<int>(Stmt->SubTree[0]->Value));
     Stmt->Type = CONST_FLOAT_NODE;
-  } else {
+    break;
+  default:
     return;
   }
+
   for (AST *Node : Stmt->SubTree)
     delete Node;
   Stmt->SubTree.clear();
@@ -465,7 +546,18 @@ void DCCodeGen::genAssignment(AST *Stmt) {
 }
 
 inline char printOperator(ASTNodeType Type) {
-  return Type == BIN_ADD_NODE ? '+' : '-';
+  switch (Type) {
+  case BIN_ADD_NODE:
+    return '+';
+  case BIN_SUB_NODE:
+    return '-';
+  case BIN_MUL_NODE:
+    return '*';
+  case BIN_DIV_NODE:
+    return '/';
+  default:
+    emitError("DCCodeGen", "unexpected operator");
+  }
 }
 
 void DCCodeGen::genExpression(AST *Expr) {
@@ -487,13 +579,15 @@ void DCCodeGen::genExpression(AST *Expr) {
     OFS << fabs(std::get<float>(Expr->Value)) << "\n";
     return;
   case BIN_ADD_NODE:
-  case BIN_SUB_NODE: {
+  case BIN_SUB_NODE:
+  case BIN_MUL_NODE:
+  case BIN_DIV_NODE: {
     assert(Expr->SubTree.size() == 2 &&
            "Expecting two children for binary expressions.");
     genExpression(Expr->SubTree[0]);
     genExpression(Expr->SubTree[1]);
     Precision Prec =
-        std::get<DataType>(Expr->Value) == DATA_INT ? PREC_INT : PREC_FLOAT;
+      std::get<DataType>(Expr->Value) == DATA_INT ? PREC_INT : PREC_FLOAT;
     if (Prec != CurPrec) {
       OFS << (Prec == PREC_INT ? 0 : 5) << " k\n";
       CurPrec = Prec;
