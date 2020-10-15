@@ -339,8 +339,16 @@ AST *Parser::parseAssignment(std::string ID) {
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
 
   AST *Expr = parseExpression();
-  if (getDataType(Expr) == DATA_FLOAT && ST.getVarType(Var) == VAR_INT)
+  VariableType VarType = ST.getVarType(Var);
+  DataType ExprType = getDataType(Expr);
+  if (ExprType == DATA_FLOAT && VarType == VAR_INT)
     emitError("Parser", "cannot convert float to integer.");
+  if (ExprType == DATA_INT && VarType == VAR_FLOAT) {
+    // Promote Expr
+    AST *Cvt = new AST(CONVERSION_NODE, Expr);
+    Cvt->Value = DATA_FLOAT;
+    Expr = Cvt;
+  }
   AST *Node = new AST(ASSIGNMENT_NODE, Expr);
   Node->Value = Var;
   return Node;
@@ -563,7 +571,9 @@ inline char printOperator(ASTNodeType Type) {
 void DCCodeGen::genExpression(AST *Expr) {
   switch (Expr->Type) {
   case CONVERSION_NODE:
-    return genExpression(Expr->SubTree[0]);
+    genExpression(Expr->SubTree[0]);
+    OFS << 0.0 << "+" << "\n";
+    return;
   case IDENTIFIER_NODE:
     OFS << "l" << static_cast<char>('a' + std::get<size_t>(Expr->Value))
         << "\n";
