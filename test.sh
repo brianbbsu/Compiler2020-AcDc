@@ -60,8 +60,8 @@ for input in $SOURCES; do
     if [[ "$EXPECTED_FLAG" = "1" ]]; then flags="${flags},expected"; fi
     flags="${flags#,}"
     EXIT_STATUS=0
-    "$EXE" "$input" "${WORKSPACE}/output.dc" 2>"${WORKSPACE}/error" >/dev/null \
-        || EXIT_STATUS=$?
+    { "$EXE" "$input" "${WORKSPACE}/output.dc" 2>"${WORKSPACE}/error" >/dev/null \
+        || EXIT_STATUS=$? ; } 2>/dev/null
     if [[ $EXIT_STATUS -gt 1 ]]; then
         # Runtime Error
         printf "$FMT" "$testcase" "Runtime Error" "$flags"

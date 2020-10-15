@@ -1,0 +1,7 @@
+i iii
+f fff
+f ppp
+iii = 5
+fff = 5.0
+ppp = iii + fff
+p ppp
