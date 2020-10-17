@@ -509,13 +509,6 @@ void doConstantFolding(AST *Stmt) {
     }
     break;
   }
-  case CONVERSION_NODE:
-    assert(Stmt->SubTree.size() == (size_t)1);
-    Stmt->Value = static_cast<float>(std::get<int>(Stmt->SubTree[0]->Value));
-    Stmt->Type = CONST_FLOAT_NODE;
-    delete Stmt->SubTree[0];
-    Stmt->SubTree.clear();
-    break;
   default:
     break;
   }
