@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 TEST_DIR="./test"
 EXE="./src/AcDc"
 
-TEST_NAME_WIDTH=30
+TEST_NAME_WIDTH=33
 TEST_STATUS_WIDTH=30
 FMT="%-${TEST_NAME_WIDTH}s %-${TEST_STATUS_WIDTH}s %s\n"
 
