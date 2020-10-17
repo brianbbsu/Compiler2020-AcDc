@@ -12,6 +12,8 @@
 #include <variant>
 #include <vector>
 
+#include "bigint.h"
+
 enum TokenType {
   DECL_INT,    // integer declaration ("i")
   DECL_FLOAT,  // float declaration ("f")
@@ -221,7 +223,7 @@ enum DataType { DATA_INT, DATA_FLOAT };
 struct AST {
   ASTNodeType Type;
   std::vector<AST *> SubTree;
-  std::variant<int, float, size_t, DataType> Value;
+  std::variant<BigInt, float, size_t, DataType> Value;
 
   AST() = default;
   AST(ASTNodeType T) : Type(T) {}
@@ -398,7 +400,7 @@ AST *Parser::parseValue() {
   switch (Tok.Type) {
   case CONST_INT:
     Node->Type = CONST_INT_NODE;
-    Node->Value = std::stoi(Tok.Value);
+    Node->Value = BigInt(Tok.Value);
     break;
   case CONST_FLOAT:
     Node->Type = CONST_FLOAT_NODE;
@@ -499,8 +501,8 @@ void doConstantFolding(AST *Stmt) {
     DataType dType = std::get<DataType>(Stmt->Value);
     if (dType != DATA_INT)
       break;
-    int newVal;
-    if (constantOperation<int>(newVal, Stmt->SubTree[0], Stmt->SubTree[1], type)) {
+    BigInt newVal;
+    if (constantOperation<BigInt>(newVal, Stmt->SubTree[0], Stmt->SubTree[1], type)) {
       Stmt->Value = newVal;
       Stmt->Type = CONST_INT_NODE;
       for (AST *Node : Stmt->SubTree)
@@ -580,9 +582,9 @@ void DCCodeGen::genExpression(AST *Expr) {
         << "\n";
     return;
   case CONST_INT_NODE:
-    if (std::get<int>(Expr->Value) < 0)
+    if (std::get<BigInt>(Expr->Value) < 0)
       OFS << "_";
-    OFS << abs(std::get<int>(Expr->Value)) << "\n";
+    OFS << std::get<BigInt>(Expr->Value).abs() << "\n";
     return;
   case CONST_FLOAT_NODE:
     if (std::get<float>(Expr->Value) < 0)
