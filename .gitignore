@@ -4,3 +4,6 @@ AcDc
 
 # vim
 .*.swp
+
+# vscode
+.vscode

@@ -455,22 +455,28 @@ AST *Parser::parseExpressionAddSub(AST *LHS) {
 }
 
 template<class T>
-T constantOperation(AST *a, AST *b, ASTNodeType op) {
+bool constantOperation(T &target, AST *a, AST *b, ASTNodeType op) {
   assert(std::holds_alternative<T>(a->Value) && std::holds_alternative<T>(b->Value));
+  // TODO: handle overflow
   switch(op) {
     case BIN_ADD_NODE:
-      return std::get<T>(a->Value) + std::get<T>(b->Value);
+      target = std::get<T>(a->Value) + std::get<T>(b->Value);
+      return true;
     case BIN_SUB_NODE:
-      return std::get<T>(a->Value) - std::get<T>(b->Value);
+      target = std::get<T>(a->Value) - std::get<T>(b->Value);
+      return true;
     case BIN_MUL_NODE:
-      return std::get<T>(a->Value) * std::get<T>(b->Value);
+      target = std::get<T>(a->Value) * std::get<T>(b->Value);
+      return true;
     case BIN_DIV_NODE:
-      // TODO: handle zero division ?
-      return std::get<T>(a->Value) / std::get<T>(b->Value);
+      if (std::get<T>(b->Value) == static_cast<T>(0))
+        return false;
+      target = std::get<T>(a->Value) / std::get<T>(b->Value);
+      return true;
     default:
       emitError("ConstantFolding", "unknown operator.");
   }
-  __builtin_unreachable();
+  return false;
 }
 
 void doConstantFolding(AST *Stmt) {
@@ -489,28 +495,30 @@ void doConstantFolding(AST *Stmt) {
   case BIN_SUB_NODE:
   case BIN_MUL_NODE:
   case BIN_DIV_NODE: {
-    // TODO: handle zero division
     assert(Stmt->SubTree.size() == (size_t)2);
     DataType dType = std::get<DataType>(Stmt->Value);
-    if (dType == DATA_INT)
-      Stmt->Value = constantOperation<int>(Stmt->SubTree[0], Stmt->SubTree[1], type);
-    else
-      Stmt->Value = constantOperation<float>(Stmt->SubTree[0], Stmt->SubTree[1], type);
-    Stmt->Type = dType == DATA_INT ? CONST_INT_NODE : CONST_FLOAT_NODE;
+    if (dType != DATA_INT)
+      break;
+    int newVal;
+    if (constantOperation<int>(newVal, Stmt->SubTree[0], Stmt->SubTree[1], type)) {
+      Stmt->Value = newVal;
+      Stmt->Type = CONST_INT_NODE;
+      for (AST *Node : Stmt->SubTree)
+        delete Node;
+      Stmt->SubTree.clear();
+    }
     break;
   }
   case CONVERSION_NODE:
     assert(Stmt->SubTree.size() == (size_t)1);
     Stmt->Value = static_cast<float>(std::get<int>(Stmt->SubTree[0]->Value));
     Stmt->Type = CONST_FLOAT_NODE;
+    delete Stmt->SubTree[0];
+    Stmt->SubTree.clear();
     break;
   default:
-    return;
+    break;
   }
-
-  for (AST *Node : Stmt->SubTree)
-    delete Node;
-  Stmt->SubTree.clear();
 }
 
 class DCCodeGen {
